@@ -29,6 +29,7 @@ import {
 } from "./dynamic-block";
 import { useThemeVersion } from "./hooks/use-theme-version";
 import {
+  HTML_BLOCK_MESSAGE_KEY,
   INITIAL_HTML_BLOCK_HEIGHT,
   buildHtmlBlockDocument,
   nextHtmlBlockHeight,
@@ -177,6 +178,16 @@ function HtmlBlockBody({
   useEffect(() => {
     setCachedHeight(readCachedHeight(html));
   }, [html]);
+
+  useEffect(() => {
+    if (!active || fullscreen) return;
+    // Fullscreen reports were ignored, but the bridge deduplicated them.
+    // Ask again after inline layout is restored, even if its height is unchanged.
+    iframeRef.current?.contentWindow?.postMessage(
+      { [HTML_BLOCK_MESSAGE_KEY]: 1, type: "measure" },
+      "*",
+    );
+  }, [active, fullscreen]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

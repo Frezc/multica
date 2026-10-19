@@ -36,6 +36,7 @@ function CodeBlockView({ node }: NodeViewProps) {
   const language = node.attrs.language || "";
   const isMermaid = language === "mermaid";
   const isHtml = language === "html";
+  const showHtmlPreview = isHtml && view === "preview";
   const chart = node.textContent;
   const debouncedChart = useDebouncedValue(
     isMermaid ? chart : "",
@@ -44,6 +45,7 @@ function CodeBlockView({ node }: NodeViewProps) {
   const debouncedHtml = useDebouncedValue(
     isHtml ? chart : "",
     PREVIEW_DEBOUNCE_MS,
+    showHtmlPreview || fullscreen,
   );
 
   const handleCopy = async () => {
@@ -55,7 +57,6 @@ function CodeBlockView({ node }: NodeViewProps) {
     }
   };
 
-  const showHtmlPreview = isHtml && view === "preview";
   const toggleView = () =>
     setView((v) => (v === "preview" ? "source" : "preview"));
 

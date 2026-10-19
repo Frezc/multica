@@ -41,8 +41,8 @@ vi.mock("../../i18n", () => ({
           show_preview: "Show preview",
           show_source: "Show source",
           fullscreen: "Fullscreen",
+          close_preview: "Close",
         },
-        attachment: { close: "Close" },
       }),
   }),
 }));
@@ -152,5 +152,36 @@ describe("CodeBlockView — html language toggle", () => {
     expect(screen.queryByTitle("Show source")).toBeNull();
     expect(screen.queryByTitle("Show preview")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("defers source edits until the retained preview is visible", () => {
+    const { rerender } = render(
+      <CodeBlockView {...makeProps("html", "<p>initial</p>")} />,
+    );
+    const frame = document.querySelector("iframe")!;
+    const editorContent = screen.getByTestId("nvc");
+
+    rerender(<CodeBlockView {...makeProps("html", "<p>pending</p>")} />);
+    fireEvent.click(screen.getByTitle("Show source"));
+    act(() => vi.advanceTimersByTime(250));
+    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+    rerender(<CodeBlockView {...makeProps("html", "<p>edited</p>")} />);
+    act(() => vi.advanceTimersByTime(250));
+    expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
+
+    fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    act(() => vi.advanceTimersByTime(250));
+    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    expect(screen.getByRole("dialog").querySelector("iframe")).toBe(frame);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    rerender(<CodeBlockView {...makeProps("html", "<p>latest</p>")} />);
+    act(() => vi.advanceTimersByTime(250));
+    expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
+    fireEvent.click(screen.getByTitle("Show preview"));
+    act(() => vi.advanceTimersByTime(250));
+    expect(frame.getAttribute("srcdoc")).toBe("<p>latest</p>");
+    expect(document.querySelector("iframe")).toBe(frame);
+    expect(screen.getByTestId("nvc")).toBe(editorContent);
   });
 });

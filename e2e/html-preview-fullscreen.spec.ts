@@ -164,6 +164,61 @@ test.describe("HTML preview fullscreen", () => {
     });
   }
 
+  test("reply remeasures content changed while enlarged, including from source", async ({ page }) => {
+    const interactiveHtml = `<style>html,body{margin:0;padding:0}</style>
+<div id="content" style="height:200px">
+  <input aria-label="Retained input" value="initial">
+  <button onclick="document.getElementById('content').style.height='1200px'">Expand content</button>
+  <button onclick="document.getElementById('content').style.height='200px'">Collapse content</button>
+</div>`;
+    const issue = await api.createIssue("HTML preview content resize");
+    const comment = await api.createComment(issue.id, `\`\`\`html\n${interactiveHtml}\n\`\`\``);
+    await page.goto(`/${workspaceSlug}/issues/${issue.identifier}`, { waitUntil: "domcontentloaded" });
+    const block = page.locator(`[data-comment-content="${comment.id}"] [data-dynamic-block="html"]`);
+    const iframe = block.locator("iframe");
+    const frame = (await (await iframe.elementHandle())!.contentFrame())!;
+    const input = iframe.contentFrame().getByRole("textbox", { name: "Retained input" });
+    await input.fill("Keep this document");
+    const timeOrigin = await frame.evaluate(() => performance.timeOrigin);
+    const inlineHeight = () => iframe.evaluate((element) => element.parentElement!.style.height);
+    await expect.poll(inlineHeight).toBe("200px");
+    const resizeContent = async (action: string, height: number) => {
+      const reported = iframe.evaluate((element, expected) => new Promise<void>((resolve) => {
+        const onMessage = (event: MessageEvent) => {
+          if (event.source !== (element as HTMLIFrameElement).contentWindow || event.data?.type !== "height" || event.data.height !== expected) return;
+          window.removeEventListener("message", onMessage);
+          resolve();
+        };
+        window.addEventListener("message", onMessage);
+      }), height);
+      await iframe.contentFrame().getByRole("button", { name: action }).click();
+      // Reproduce the bridge deduplication before closing the enlarged preview.
+      await reported;
+    };
+
+    for (const [action, height] of [["Expand content", 1200], ["Collapse content", 200]] as const) {
+      await block.hover();
+      await block.getByRole("button", { name: "Fullscreen" }).click();
+      await resizeContent(action, height);
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      await expect.poll(inlineHeight).toBe(`${height}px`);
+      await expect(block.getByRole("button", { name: "Show all", exact: true })).toHaveCount(height > 480 ? 1 : 0);
+      await expect(input).toHaveValue("Keep this document");
+      expect(await frame.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+    }
+
+    await block.getByRole("tab", { name: "Source" }).click();
+    await block.getByRole("button", { name: "Fullscreen" }).click();
+    await resizeContent("Expand content", 1200);
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect(block.getByRole("tab", { name: "Source" })).toHaveAttribute("aria-selected", "true");
+    await block.getByRole("tab", { name: "Preview" }).click();
+    await expect.poll(inlineHeight).toBe("1200px");
+    await expect(block.getByRole("button", { name: "Show all", exact: true })).toBeVisible();
+    await expect(input).toHaveValue("Keep this document");
+    expect(await frame.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  });
+
   test("enlarging from expanded reply source preserves its panel and outer layout", async ({
     page,
   }, testInfo) => {

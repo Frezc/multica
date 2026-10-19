@@ -108,7 +108,7 @@ export function HtmlPreviewSurface({
               variant="ghost"
               size="icon-sm"
               className="absolute top-2 right-2"
-              aria-label={t(($) => $.attachment.close)}
+              aria-label={t(($) => $.code_block.close_preview)}
               onClick={() => dialogRef.current?.close()}
             >
               <X />
