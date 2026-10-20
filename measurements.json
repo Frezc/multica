@@ -1,0 +1,37 @@
+{
+  "upstream_base": "47120a4131564175da044d63d897ed9b5d76979a",
+  "candidate": "f8f42dd2b2858ee1e3dea52da4091f292f8f6fd0",
+  "browser": "Linux Chromium",
+  "full_browser_suite": "4 passed",
+  "targeted_components": "65 passed in 2 files",
+  "views_typecheck": "passed",
+  "targeted_eslint": "passed",
+  "diff_check": "passed",
+  "comparison": [
+    {
+      "phase": "before",
+      "viewport": [
+        1052,
+        360
+      ],
+      "detail_column_y": -264,
+      "outer_scroll_top": 272,
+      "body_scroll_top": 2375
+    },
+    {
+      "phase": "after",
+      "viewport": [
+        1052,
+        360
+      ],
+      "detail_column_y": 8,
+      "outer_scroll_top": 0,
+      "body_scroll_top": 2375
+    }
+  ],
+  "limits": [
+    "Synthetic read projections for inbox and completed execution history; issue/comment setup uses a disposable local database.",
+    "macOS Chrome 155 and Electron were not run.",
+    "Initial local setup attempts failed on IPv6 PostgreSQL reachability; the verified isolated database was then used over IPv4."
+  ]
+}
