@@ -939,7 +939,7 @@ export function InboxPage() {
       // no-op, and pointed both scroll restoration and the timeline
       // virtualizer at an element that never scrolls. This wrapper only has to
       // give the detail a definite height to fill.
-      return <div className="flex flex-1 flex-col min-h-0">{detailContent}</div>;
+      return <div className="flex flex-1 flex-col min-h-0 overflow-clip">{detailContent}</div>;
     }
 
     if (detailItem) {
@@ -987,7 +987,7 @@ export function InboxPage() {
           </div>
         </ResizablePanel>
         <ResizableHandle />
-        <ResizablePanel id="detail" minSize="40%">
+        <ResizablePanel id="detail" minSize="40%" className="flex min-h-0 flex-col" style={{ overflow: "clip" }}>
           <div className="p-6">
             <Skeleton className="h-6 w-48" />
             <Skeleton className="mt-4 h-4 w-32" />
@@ -1011,8 +1011,10 @@ export function InboxPage() {
       </div>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel id="detail" minSize="40%">
-      <div className="flex flex-col min-h-0 h-full">
+      {/* IssueDetail owns the body and sidebar scrollers. The panel's default
+          overflow:auto would also let the entire detail scroll out of view. */}
+      <ResizablePanel id="detail" minSize="40%" className="flex min-h-0 flex-col" style={{ overflow: "clip" }}>
+      <div className={cn("flex flex-1 flex-col min-h-0", !detailItem?.issue_id && "overflow-y-auto")}>
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
