@@ -899,7 +899,17 @@ type githubContentEntry struct {
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
 	URL         string `json:"url"`
+	GitURL      string `json:"git_url"`
 	DownloadURL string `json:"download_url"`
+}
+
+// isSubmodule reports whether a directory-listing entry is a Git submodule.
+// For backwards compatibility the contents API lists submodules inside a
+// directory as type "file" with a null download_url; their git_url points at
+// the submodule repository's tree rather than a blob. The recursive tree path
+// skips submodules (type "commit"), so the crawl fallback must skip them too.
+func (e githubContentEntry) isSubmodule() bool {
+	return e.Type == "submodule" || (e.DownloadURL == "" && strings.Contains(e.GitURL, "/git/trees/"))
 }
 
 type githubRepoInfo struct {
@@ -1573,6 +1583,9 @@ func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []
 		}
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
+			continue
+		}
+		if entry.isSubmodule() {
 			continue
 		}
 		if entry.Type == "file" {

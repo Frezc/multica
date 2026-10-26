@@ -19,10 +19,13 @@ func TestRefreshSkill_GitHubBundleIsAtomic(t *testing.T) {
 		listingError string
 		fileStatus   int
 		shortBody    bool
+		submodule    bool
 		want         int
 	}{
 		{name: "complete tree", want: 200},
 		{name: "complete crawl", crawl: true, want: 200},
+		{name: "tree skips submodule", submodule: true, want: 200},
+		{name: "crawl skips submodule", crawl: true, submodule: true, want: 200},
 		{name: "tree unavailable complete crawl", treeStatus: 403, crawl: true, want: 200},
 		{name: "tree and crawl unavailable", treeStatus: 403, listingError: "root status", want: 503},
 		{name: "root listing unavailable", crawl: true, listingError: "root status", want: 503},
@@ -70,11 +73,15 @@ func TestRefreshSkill_GitHubBundleIsAtomic(t *testing.T) {
 						w.WriteHeader(tc.treeStatus)
 						return
 					}
-					writeJSON(w, 200, githubTreeResponse{Truncated: tc.crawl, Tree: []githubTreeEntry{
+					tree := []githubTreeEntry{
 						{Path: "skills/foo/SKILL.md", Type: "blob"},
 						{Path: "skills/foo/refs/guide.md", Type: "blob", Size: 11},
 						{Path: "skills/foo/image.png", Type: "blob"},
-					}})
+					}
+					if tc.submodule {
+						tree = append(tree, githubTreeEntry{Path: "skills/foo/vendor", Type: "commit"})
+					}
+					writeJSON(w, 200, githubTreeResponse{Truncated: tc.crawl, Tree: tree})
 				case strings.HasSuffix(r.URL.Path, "/contents/skills/foo"):
 					switch tc.listingError {
 					case "root status":
@@ -84,7 +91,14 @@ func TestRefreshSkill_GitHubBundleIsAtomic(t *testing.T) {
 					case "root null":
 						fmt.Fprint(w, "null")
 					default:
-						writeJSON(w, 200, []githubContentEntry{{Name: "refs", Path: "skills/foo/refs", Type: "dir"}, {Name: "image.png", Path: "skills/foo/image.png", Type: "file"}})
+						entries := []githubContentEntry{{Name: "refs", Path: "skills/foo/refs", Type: "dir"}, {Name: "image.png", Path: "skills/foo/image.png", Type: "file"}}
+						if tc.submodule {
+							// Directory listings report submodules as type "file" with a
+							// null download_url and a git_url pointing at a tree.
+							entries = append(entries, githubContentEntry{Name: "vendor", Path: "skills/foo/vendor", Type: "file",
+								GitURL: "https://api.github.com/repos/acme/vendor/git/trees/855827c583bc30645ba427885caa40c5b81764d2"})
+						}
+						writeJSON(w, 200, entries)
 					}
 				case strings.HasSuffix(r.URL.Path, "/contents/skills/foo/refs"):
 					switch tc.listingError {
