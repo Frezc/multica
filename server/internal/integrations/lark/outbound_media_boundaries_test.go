@@ -262,12 +262,12 @@ func TestOutboundQueueDeadlineStillSendsNotice(t *testing.T) {
 	p, q, api, id := mediaFixture(t)
 	client := &noticeContextClient{fakeMediaAPIClient: api}
 	p.client = client
-	for i := 0; i < cap(attachmentSlots); i++ {
-		attachmentSlots <- struct{}{}
+	for i := 0; i < cap(p.mediaSlots); i++ {
+		p.mediaSlots <- struct{}{}
 	}
 	defer func() {
-		for i := 0; i < cap(attachmentSlots); i++ {
-			<-attachmentSlots
+		for i := 0; i < cap(p.mediaSlots); i++ {
+			<-p.mediaSlots
 		}
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -303,14 +303,14 @@ func TestOutboundCapacityBoundsLookupAndWaitsForSlot(t *testing.T) {
 	})
 	t.Run("busy-upload-waits", func(t *testing.T) {
 		p, q, api, id := mediaFixture(t)
-		for i := 0; i < cap(attachmentSlots); i++ {
-			attachmentSlots <- struct{}{}
+		for i := 0; i < cap(p.mediaSlots); i++ {
+			p.mediaSlots <- struct{}{}
 		}
 		var release sync.Once
 		free := func() {
 			release.Do(func() {
-				for i := 0; i < cap(attachmentSlots); i++ {
-					<-attachmentSlots
+				for i := 0; i < cap(p.mediaSlots); i++ {
+					<-p.mediaSlots
 				}
 			})
 		}

@@ -233,9 +233,12 @@ type Patcher struct {
 	objects        mediaObjectStore
 	mediaAdmission chan struct{}
 	mediaPending   chan struct{}
-	mediaBudget    time.Duration
-	spawn          func(func())
-	cfg            PatcherConfig
+	// mediaSlots bounds concurrent transfers. Per-patcher, like the two
+	// admission tiers above, so all three limits share one scope.
+	mediaSlots  chan struct{}
+	mediaBudget time.Duration
+	spawn       func(func())
+	cfg         PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
@@ -249,6 +252,7 @@ func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client 
 		cfg:            cfg,
 		mediaAdmission: make(chan struct{}, maxAdmittedAttachmentDeliveries),
 		mediaPending:   make(chan struct{}, maxPendingAttachmentDeliveries),
+		mediaSlots:     make(chan struct{}, maxConcurrentAttachmentDeliveries),
 		mediaBudget:    attachmentBudget,
 		spawn:          func(f func()) { go f() },
 	}

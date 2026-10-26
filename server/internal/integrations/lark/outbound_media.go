@@ -41,8 +41,6 @@ const (
 	maxPendingAttachmentDeliveries    = 32
 )
 
-var attachmentSlots = make(chan struct{}, maxConcurrentAttachmentDeliveries)
-
 // SetAttachments returns the same capability verdict announced on task claim.
 func (p *Patcher) SetAttachments(objects mediaObjectStore) bool {
 	p.objects = objects
@@ -132,8 +130,8 @@ func (p *Patcher) deliverAttachments(ctx context.Context, creds InstallationCred
 		return
 	}
 	select {
-	case attachmentSlots <- struct{}{}:
-		defer func() { <-attachmentSlots }()
+	case p.mediaSlots <- struct{}{}:
+		defer func() { <-p.mediaSlots }()
 	case <-ctx.Done():
 		p.tellUser(ctx, creds, binding, target, mediaSendFailedText)
 		return
