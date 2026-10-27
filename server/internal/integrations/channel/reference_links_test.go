@@ -1,9 +1,112 @@
 package channel
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
+
+func TestLinkReferencesContainerDestinations(t *testing.T) {
+	const target = "mention://project/real-id"
+	const destination = "https://deployment.example/team/projects/real-id"
+	for _, body := range []string{
+		"> [Project](\n> " + target + "\n> )",
+		"> [Project](\n> <" + target + "> \"Title\"\n> )",
+		"> > [Project](\n> > " + target + "\n> > )",
+		"> - [Project](\n>   " + target + "\n>   )",
+		"> [Project](\r\n> " + target + "\r\n> )",
+		"- [Project](\n  " + target + "\n  )",
+	} {
+		t.Run(body, func(t *testing.T) {
+			got := LinkReferences(body, func(kind, id string) string { return destination })
+			if want := strings.Replace(body, target, destination, 1); got != want {
+				t.Fatalf("rewrite=%q, want=%q", got, want)
+			}
+		})
+	}
+}
+
+func TestLinkReferencesEscapedDestinations(t *testing.T) {
+	const destination = "https://deployment.example/team/projects/real-id"
+	for _, target := range []string{
+		`mention\://project/real-id`,
+		`mention:\/\/project/real-id`,
+		`mention&#58;//project/real-id`,
+		`&#109;ention://project/real-id`,
+		`mention&colon;&sol;&sol;project/real-id`,
+	} {
+		t.Run(target, func(t *testing.T) {
+			body := "[Project](" + target + " \"mention://project/real-id\")"
+			got := LinkReferences(body, func(kind, id string) string {
+				if kind != "project" || id != "real-id" {
+					t.Fatalf("unexpected target: %s/%s", kind, id)
+				}
+				return destination
+			})
+			if want := "[Project](" + destination + " \"mention://project/real-id\")"; got != want {
+				t.Fatalf("rewrite=%q, want=%q", got, want)
+			}
+			if unresolved := LinkReferences(body, func(string, string) string { return "" }); unresolved != body {
+				t.Fatalf("unresolved destination changed: %q", unresolved)
+			}
+		})
+	}
+}
+
+func TestLinkReferencesTableBoundaries(t *testing.T) {
+	const issue = "[FEED-193](https://deployment.example/team/issues/FEED-193)"
+	for _, tc := range []struct{ name, body, want string }{
+		{"adjacent cells", "|docs|task|\n|---|---|\n|https://docs.example|FEED-193|", "|docs|task|\n|---|---|\n|https://docs.example|" + issue + "|"},
+		{"URL query", "|docs|task|\n|---|---|\n|https://docs.example/?q=FEED-193|FEED-193|", "|docs|task|\n|---|---|\n|https://docs.example/?q=FEED-193|" + issue + "|"},
+		{"emphasis in URL", "|docs|task|\n|---|---|\n|https://docs.example/?q=**FEED-193**|FEED-193|", "|docs|task|\n|---|---|\n|https://docs.example/?q=**FEED-193**|" + issue + "|"},
+		{"escaped pipe in URL", "|docs|task|\n|---|---|\n|https://docs.example/?q=FEED-193\\|part|FEED-193|", "|docs|task|\n|---|---|\n|https://docs.example/?q=FEED-193\\|part|" + issue + "|"},
+		{"quoted table", "> |docs|task|\n> |---|---|\n> |https://docs.example|FEED-193|", "> |docs|task|\n> |---|---|\n> |https://docs.example|" + issue + "|"},
+		{"code with pipe", "|docs|task|\n|---|---|\n|`https://docs.example/FEED-193\\|FEED-193`|FEED-193|", "|docs|task|\n|---|---|\n|`https://docs.example/FEED-193\\|FEED-193`|" + issue + "|"},
+		{"pipe outside table", "https://docs.example/?q=FEED-193|FEED-193", "https://docs.example/?q=FEED-193|FEED-193"},
+		{"inline code", "`|docs|task|\n|---|---|\n|https://docs.example|FEED-193|`", "`|docs|task|\n|---|---|\n|https://docs.example|FEED-193|`"},
+		{"without outer pipes", "docs|task\n---|---\nhttps://docs.example|FEED-193", "docs|task\n---|---\nhttps://docs.example|" + issue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LinkReferences(tc.body, func(kind, id string) string { return "https://deployment.example/team/issues/FEED-193" })
+			if got != tc.want {
+				t.Fatalf("rewrite=%q, want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLinkReferencesReferenceTitles(t *testing.T) {
+	const target = "mention://project/real-id"
+	const destination = "https://deployment.example/team/projects/real-id"
+	for _, form := range []string{"[Project][ref]", "[Project][]", "[Project]"} {
+		for _, title := range []string{`"Title"`, `'A "quote" &amp; value'`, `"escaped \&amp; and \\path"`, "\"multi\nline\""} {
+			t.Run(form+title, func(t *testing.T) {
+				label := "ref"
+				if form != "[Project][ref]" {
+					label = "Project"
+				}
+				body := form + "\n\n[" + label + "]: " + target + " " + title
+				for _, body := range []string{body, "> " + strings.ReplaceAll(body, "\n", "\n> ")} {
+					converted := LinkReferences(body, func(string, string) string { return destination })
+					var originalHTML, convertedHTML bytes.Buffer
+					md := goldmark.New(goldmark.WithExtensions(extension.Table))
+					if err := md.Convert([]byte(body), &originalHTML); err != nil {
+						t.Fatal(err)
+					}
+					if err := md.Convert([]byte(converted), &convertedHTML); err != nil {
+						t.Fatal(err)
+					}
+					if want := strings.Replace(originalHTML.String(), target, destination, 1); convertedHTML.String() != want {
+						t.Fatalf("rendered=%q, want=%q; source=%q", convertedHTML.String(), want, converted)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestLinkReferences(t *testing.T) {
 	const destination = "https://deployment.example/team/projects/real-id"

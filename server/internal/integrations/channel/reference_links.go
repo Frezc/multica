@@ -1,14 +1,20 @@
 package channel
 
 import (
+	"bufio"
 	"bytes"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/parser"
+	htmlrenderer "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 var replyIssueIdentifier = regexp.MustCompile(`[A-Z0-9]{1,10}-[0-9]+`)
@@ -26,7 +32,7 @@ type referenceEdit struct {
 // resolver. Code, existing URLs and unresolved references retain their source.
 // Broadcast mentions have no detail route and become inert display text.
 func LinkReferences(content string, resolve func(kind, reference string) string) string {
-	if resolve == nil || (!strings.Contains(content, "mention://") && !replyIssueIdentifier.MatchString(content)) {
+	if resolve == nil || (!strings.Contains(content, "[") && !replyIssueIdentifier.MatchString(content)) {
 		return content
 	}
 	var out strings.Builder
@@ -58,7 +64,8 @@ func referenceEdits(content string) []referenceEdit {
 	}
 	p := parser.NewParser(parser.WithBlockParsers(parser.DefaultBlockParsers()...), parser.WithInlineParsers(inlines...), parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...))
 	source := []byte(content)
-	doc := p.Parse(text.NewReader(source))
+	md := goldmark.New(goldmark.WithParser(p), goldmark.WithExtensions(extension.Table))
+	doc := md.Parser().Parse(text.NewReader(source))
 	urls := referenceURLRanges(source, doc)
 	var edits []referenceEdit
 	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -67,7 +74,7 @@ func referenceEdits(content string) []referenceEdit {
 		}
 		switch n := node.(type) {
 		case *ast.Link:
-			if target, ok := strings.CutPrefix(string(n.Destination), "mention://"); ok {
+			if target, ok := strings.CutPrefix(string(util.URLEscape(n.Destination, true)), "mention://"); ok {
 				kind, reference, valid := strings.Cut(target, "/")
 				if !valid || kind == "" || reference == "" {
 					return ast.WalkSkipChildren, nil
@@ -84,11 +91,17 @@ func referenceEdits(content string) []referenceEdit {
 						return ast.WalkSkipChildren, nil
 					}
 					if end, ok := end.(int); ok && n.Reference != nil {
-						edit.start, edit.end, edit.prefix, edit.suffix = labelEnd+1, end, "(", ")"
+						edit.start, edit.end, edit.prefix, edit.suffix = labelEnd+1, end, "(", inlineReferenceTitle(n.Title)+")"
 						edits = append(edits, edit)
-					} else if start, end := inlineReferenceDestination(source, labelEnd, n.Destination); start >= 0 {
-						edit.start, edit.end = start, end
-						edits = append(edits, edit)
+					} else {
+						start, _ := n.AttributeString("reference_destination_start")
+						stop, _ := n.AttributeString("reference_destination_end")
+						if start, ok := start.(int); ok {
+							if stop, ok := stop.(int); ok && start >= 0 && start < stop && stop <= len(source) {
+								edit.start, edit.end = start, stop
+								edits = append(edits, edit)
+							}
+						}
 					}
 				}
 			}
@@ -123,6 +136,13 @@ func referenceURLRanges(source []byte, doc ast.Node) []text.Segment {
 			return ast.WalkContinue, nil
 		}
 		switch node.(type) {
+		case *extast.TableCell:
+			// A raw URL may span emphasis nodes, but cannot cross into the
+			// next GFM cell. Escaped pipes inside a cell remain URL content.
+			for i := 0; i < node.Lines().Len(); i++ {
+				line := node.Lines().At(i)
+				markup = append(markup, text.NewSegment(line.Start, line.Start), text.NewSegment(line.Stop, line.Stop))
+			}
 		case *ast.Link, *ast.Image, *ast.CodeSpan, *ast.AutoLink, *ast.RawHTML:
 			start, _ := node.AttributeString("source_start")
 			end, _ := node.AttributeString("source_end")
@@ -160,16 +180,37 @@ func referenceURLRanges(source []byte, doc ast.Node) []text.Segment {
 type referenceSourceParser struct{ parser.InlineParser }
 
 func (p referenceSourceParser) Parse(parent ast.Node, reader text.Reader, pc parser.Context) ast.Node {
-	_, before := reader.Position()
+	beforeLine, before := reader.Position()
 	n := p.InlineParser.Parse(parent, reader, pc)
 	switch n.(type) {
 	case *ast.Link, *ast.Image, *ast.CodeSpan, *ast.AutoLink, *ast.RawHTML:
-		_, end := reader.Position()
+		endLine, end := reader.Position()
 		start := before.Start
 		switch n.(type) {
 		case *ast.Link:
 			n.SetAttributeString("reference_label_end", before.Start)
 			start = n.Pos()
+			link := n.(*ast.Link)
+			if link.Reference == nil {
+				// Reuse the block reader's container-aware whitespace handling;
+				// raw source scanning would stop at a continuation line's '>'.
+				reader.SetPosition(beforeLine, before)
+				reader.Advance(1) // closing label bracket
+				if reader.Peek() == '(' {
+					reader.Advance(1)
+					reader.SkipSpaces()
+					if reader.Peek() == '<' {
+						reader.Advance(1)
+					}
+					_, destination := reader.Position()
+					stop := destination.Start + len(link.Destination)
+					if destination.Start >= 0 && stop <= end.Start && bytes.HasPrefix(reader.Source()[destination.Start:], link.Destination) {
+						n.SetAttributeString("reference_destination_start", destination.Start)
+						n.SetAttributeString("reference_destination_end", stop)
+					}
+				}
+				reader.SetPosition(endLine, end)
+			}
 		case *ast.Image:
 			start = n.Pos()
 		}
@@ -185,21 +226,18 @@ func (p referenceSourceParser) CloseBlock(parent ast.Node, reader text.Reader, p
 	}
 }
 
-func inlineReferenceDestination(source []byte, labelEnd int, destination []byte) (int, int) {
-	if labelEnd < 0 || labelEnd+1 >= len(source) || source[labelEnd] != ']' || source[labelEnd+1] != '(' {
-		return -1, -1
+func inlineReferenceTitle(title []byte) string {
+	if title == nil {
+		return ""
 	}
-	start := labelEnd + 2
-	for start < len(source) && strings.ContainsRune(" \t\r\n", rune(source[start])) {
-		start++
-	}
-	if start < len(source) && source[start] == '<' {
-		start++
-	}
-	if bytes.HasPrefix(source[start:], destination) {
-		return start, start + len(destination)
-	}
-	return -1, -1
+	// Use Goldmark's own title decoding, then keep the expanded title on one
+	// source line so reference links in quotes/lists retain their containers.
+	var escaped bytes.Buffer
+	w := bufio.NewWriter(&escaped)
+	htmlrenderer.DefaultWriter.Write(w, title)
+	_ = w.Flush()
+	value := strings.NewReplacer("\\", "&#92;", "\r", "&#13;", "\n", "&#10;").Replace(escaped.String())
+	return ` "` + value + `"`
 }
 
 func bareIssueInProse(source []byte, node *ast.Text, start, end int) bool {

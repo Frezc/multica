@@ -133,6 +133,12 @@ func TestLinkReplyReferencesMarkdownForms(t *testing.T) {
 			{"full reference", "[Label][ref]\n\n[ref]: %s", "[Label](%s)\n\n[ref]: %s", false},
 			{"collapsed reference", "[Label][]\n\n[Label]: %s", "[Label](%s)\n\n[Label]: %s", false},
 			{"shortcut reference", "[Label]\n\n[Label]: %s", "[Label](%s)\n\n[Label]: %s", false},
+			{"multiline quote", "> [Label](\n> %s\n> )", "> [Label](\n> %s\n> )", false},
+			{"quoted angle and title", "> [Label](\n> <%s> \"Title\"\n> )", "> [Label](\n> <%s> \"Title\"\n> )", false},
+			{"nested quoted list", "> - [Label](\n>   %s\n>   )", "> - [Label](\n>   %s\n>   )", false},
+			{"full reference with title", "[Label][ref]\n\n[ref]: %s \"Title\"", "[Label](%s \"Title\")\n\n[ref]: %s \"Title\"", false},
+			{"collapsed reference with title", "[Label][]\n\n[Label]: %s \"Title\"", "[Label](%s \"Title\")\n\n[Label]: %s \"Title\"", false},
+			{"shortcut reference with title", "[Label]\n\n[Label]: %s \"Title\"", "[Label](%s \"Title\")\n\n[Label]: %s \"Title\"", false},
 			{"code", "`[Label](%s)`", "", true},
 			{"image", "![Label](%s)", "", true},
 		} {
@@ -161,6 +167,30 @@ func TestLinkReplyReferencesMarkdownForms(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestLinkReplyReferencesEncodedTargets(t *testing.T) {
+	for kind, route := range map[string]string{"issue": "issues", "project": "projects", "member": "members", "agent": "agents", "squad": "squads"} {
+		t.Run(kind, func(t *testing.T) {
+			p, q := referenceLinkFixture(t)
+			id, resolved := uuidString(q.referenceID), uuidString(q.referenceID)
+			if kind == "issue" {
+				id, resolved = uuidString(q.issue.ID), "FEED-193"
+			}
+			var body, want []string
+			link := "https://deployment.example/feedback/" + route + "/" + resolved
+			for _, scheme := range []string{`mention\://`, `mention:\/\/`, "mention&#58;//", "&#109;ention://", "mention&colon;&sol;&sol;"} {
+				body = append(body, "[@Label]("+scheme+kind+"/"+id+")")
+				want = append(want, "[@Label]("+link+")")
+			}
+			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, strings.Join(body, " ")); got != strings.Join(want, " ") {
+				t.Fatalf("reply=%q, want=%q", got, strings.Join(want, " "))
+			}
+			if q.workspaceReads != 1 || len(q.referenceReads)+len(q.idReads) != 1 {
+				t.Fatal("normalized aliases did not share the resource cache")
+			}
+		})
 	}
 }
 
