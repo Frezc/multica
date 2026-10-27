@@ -1,0 +1,20 @@
+{
+  "starting_public_head": "274390bfca9d3df2d6c82078ddcc38f1082635f9",
+  "reproduced_failure_cases": 27,
+  "leaf_passed": 388,
+  "failed": 0,
+  "skipped": 0,
+  "new_leaf_cases": 67,
+  "randomized_markdown_inputs": 30000,
+  "random_seed": 9604,
+  "go_vet": "passed",
+  "server_test_compilation": "passed",
+  "raw_url_and_code_protection": "retained",
+  "reference_kinds": [
+    "issue",
+    "project",
+    "member",
+    "agent",
+    "squad"
+  ]
+}
