@@ -1,0 +1,11 @@
+{
+  "base": "d7d1831fcf39b874911aae1e48b2fbf804bd068e",
+  "go_version": "go version go1.26.9 linux/amd64",
+  "leaf_passed": 321,
+  "failed": 0,
+  "skipped": 0,
+  "baseline_expected_failure": true,
+  "captured_outbound_before_after": true,
+  "go_vet": "passed",
+  "server_test_compilation": "passed"
+}
