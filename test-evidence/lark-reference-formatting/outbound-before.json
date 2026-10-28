@@ -1,0 +1,9 @@
+{
+  "fixture": "Synthetic data; all resource lookups return not found",
+  "input_markdown": "[Issue](mention://issue/11111111-1111-4111-8111-111111111111) DEMO-999\n[project](mention://project/11111111-1111-4111-8111-111111111111)\n[member](mention://member/11111111-1111-4111-8111-111111111111)\n[agent](mention://agent/11111111-1111-4111-8111-111111111111)\n[squad](mention://squad/11111111-1111-4111-8111-111111111111)\n[existing](https://docs.example/DEMO-999)DEMO-1000\n`DEMO-999`\nUTF-8 SHA-256\n[@all](mention://all/all)",
+  "live_feishu_call": false,
+  "outbound_markdown": "[Issue](mention://issue/11111111-1111-4111-8111-111111111111) DEMO-999\n[project](mention://project/11111111-1111-4111-8111-111111111111)\n[member](mention://member/11111111-1111-4111-8111-111111111111)\n[agent](mention://agent/11111111-1111-4111-8111-111111111111)\n[squad](mention://squad/11111111-1111-4111-8111-111111111111)\n[existing](https://docs.example/DEMO-999)DEMO-1000\n`DEMO-999`\nUTF-8 SHA-256\n@all",
+  "resource_queries": 7,
+  "source_revision": "b24f48309a7716df5850eab0912a510fd60e096c",
+  "workspace_queries": 1
+}

@@ -1,0 +1,24 @@
+{
+  "base": "b24f48309a7716df5850eab0912a510fd60e096c",
+  "leaf_passed": 411,
+  "failed": 0,
+  "skipped": 0,
+  "focused_reference_leaf_passed": 255,
+  "reproduced_failure_cases": 11,
+  "maximum_distinct_targets_in_single_reply": 480,
+  "workspace_queries_per_candidate_reply": 1,
+  "target_queries": 0,
+  "go_vet": "passed",
+  "server_test_compilation": "passed",
+  "shared_markdown_converter": "unchanged",
+  "head": "034d2dd717c538f32bc3dee6d5286306ff61fe37",
+  "source_tree": "8e3b9deea7e793a8e1ea9da5a7c1912a2cb4f993",
+  "outbound_capture": {
+    "before_workspace_queries": 1,
+    "before_resource_queries": 7,
+    "after_workspace_queries": 1,
+    "after_resource_queries": 0,
+    "synthetic_fixtures": true,
+    "live_feishu_call": false
+  }
+}
