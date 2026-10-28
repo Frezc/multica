@@ -4,6 +4,6 @@
   "live_feishu_call": false,
   "outbound_markdown": "[Issue](https://app.example/demo/issues/11111111-1111-4111-8111-111111111111) [DEMO-999](https://app.example/demo/issues/DEMO-999)\n[project](https://app.example/demo/projects/11111111-1111-4111-8111-111111111111)\n[member](https://app.example/demo/members/11111111-1111-4111-8111-111111111111)\n[agent](https://app.example/demo/agents/11111111-1111-4111-8111-111111111111)\n[squad](https://app.example/demo/squads/11111111-1111-4111-8111-111111111111)\n[existing](https://docs.example/DEMO-999)[DEMO-1000](https://app.example/demo/issues/DEMO-1000)\n`DEMO-999`\nUTF-8 SHA-256\n@all",
   "resource_queries": 0,
-  "source_revision": "034d2dd717c538f32bc3dee6d5286306ff61fe37",
+  "source_revision": "f950a748d82484914e8a78e4f62b7f947f8da505",
   "workspace_queries": 1
 }

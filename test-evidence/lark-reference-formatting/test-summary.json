@@ -1,6 +1,6 @@
 {
   "base": "b24f48309a7716df5850eab0912a510fd60e096c",
-  "leaf_passed": 411,
+  "leaf_passed": 522,
   "failed": 0,
   "skipped": 0,
   "focused_reference_leaf_passed": 255,
@@ -8,11 +8,20 @@
   "maximum_distinct_targets_in_single_reply": 480,
   "workspace_queries_per_candidate_reply": 1,
   "target_queries": 0,
-  "go_vet": "passed",
+  "go_vet": "passed on go1.27.3",
   "server_test_compilation": "passed",
   "shared_markdown_converter": "unchanged",
-  "head": "034d2dd717c538f32bc3dee6d5286306ff61fe37",
-  "source_tree": "8e3b9deea7e793a8e1ea9da5a7c1912a2cb4f993",
+  "packages": [
+    "github.com/multica-ai/multica/server/internal/integrations/channel",
+    "github.com/multica-ai/multica/server/internal/integrations/lark",
+    "github.com/multica-ai/multica/server/internal/util"
+  ],
+  "toolchain": "go1.26.9",
+  "vulnerable_dependency": "golang.org/x/net v0.60.0",
+  "fixed_dependency": "golang.org/x/net v0.62.0",
+  "head": "f950a748d82484914e8a78e4f62b7f947f8da505",
+  "source_tree": "9f3599326714980847ea4168c748b9c47a36b220",
+  "govulncheck": "No vulnerabilities found on go1.27.3",
   "outbound_capture": {
     "before_workspace_queries": 1,
     "before_resource_queries": 7,
