@@ -103,24 +103,6 @@ func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.A
 func (f *fakePatcherQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return db.Workspace{}, pgx.ErrNoRows
 }
-func (f *fakePatcherQueries) GetIssueInWorkspace(context.Context, db.GetIssueInWorkspaceParams) (db.Issue, error) {
-	return db.Issue{}, pgx.ErrNoRows
-}
-func (f *fakePatcherQueries) GetIssueByNumber(context.Context, db.GetIssueByNumberParams) (db.Issue, error) {
-	return db.Issue{}, pgx.ErrNoRows
-}
-func (f *fakePatcherQueries) GetProjectInWorkspace(context.Context, db.GetProjectInWorkspaceParams) (db.Project, error) {
-	return db.Project{}, pgx.ErrNoRows
-}
-func (f *fakePatcherQueries) GetAgentInWorkspace(context.Context, db.GetAgentInWorkspaceParams) (db.Agent, error) {
-	return db.Agent{}, pgx.ErrNoRows
-}
-func (f *fakePatcherQueries) GetSquadInWorkspace(context.Context, db.GetSquadInWorkspaceParams) (db.Squad, error) {
-	return db.Squad{}, pgx.ErrNoRows
-}
-func (f *fakePatcherQueries) GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
-	return db.Member{}, pgx.ErrNoRows
-}
 func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error) {
 	return f.installation, f.installationErr
 }

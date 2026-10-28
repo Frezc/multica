@@ -7,116 +7,54 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+const referenceUUID = "11111111-1111-4111-8111-111111111111"
+const issueUUID = "44444444-4444-4444-8444-444444444444"
+
 type referenceLinkQueryFake struct {
 	*fakePatcherQueries
-	workspace      db.Workspace
-	issue          db.Issue
-	workspaceErr   error
-	issueErr       error
-	workspaceReads int
-	idReads        []db.GetIssueInWorkspaceParams
-	numberReads    []db.GetIssueByNumberParams
-	referenceID    pgtype.UUID
-	referenceWS    pgtype.UUID
-	referenceErr   error
-	referenceReads []referenceLookup
+	workspace       db.Workspace
+	workspaceErr    error
+	workspaceReads  int
+	workspaceReadID pgtype.UUID
 }
 
-type referenceLookup struct {
-	kind            string
-	id, workspaceID pgtype.UUID
-}
-
-func (f *referenceLinkQueryFake) readReference(kind string, id, workspaceID pgtype.UUID) error {
-	f.referenceReads = append(f.referenceReads, referenceLookup{kind, id, workspaceID})
-	if f.referenceErr != nil {
-		return f.referenceErr
-	}
-	if workspaceID != f.workspace.ID || id != f.referenceID {
-		return pgx.ErrNoRows
-	}
-	return nil
-}
-
-func (f *referenceLinkQueryFake) GetProjectInWorkspace(_ context.Context, p db.GetProjectInWorkspaceParams) (db.Project, error) {
-	return db.Project{ID: f.referenceID, WorkspaceID: f.referenceWS}, f.readReference("project", p.ID, p.WorkspaceID)
-}
-func (f *referenceLinkQueryFake) GetAgentInWorkspace(_ context.Context, p db.GetAgentInWorkspaceParams) (db.Agent, error) {
-	return db.Agent{ID: f.referenceID, WorkspaceID: f.referenceWS}, f.readReference("agent", p.ID, p.WorkspaceID)
-}
-func (f *referenceLinkQueryFake) GetSquadInWorkspace(_ context.Context, p db.GetSquadInWorkspaceParams) (db.Squad, error) {
-	return db.Squad{ID: f.referenceID, WorkspaceID: f.referenceWS}, f.readReference("squad", p.ID, p.WorkspaceID)
-}
-func (f *referenceLinkQueryFake) GetMemberByUserAndWorkspace(_ context.Context, p db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
-	return db.Member{ID: f.issue.ID, UserID: f.referenceID, WorkspaceID: f.referenceWS}, f.readReference("member", p.UserID, p.WorkspaceID)
-}
-
-func (f *referenceLinkQueryFake) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
+func (f *referenceLinkQueryFake) GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error) {
 	f.workspaceReads++
+	f.workspaceReadID = id
+	if ctx.Err() != nil {
+		return db.Workspace{}, ctx.Err()
+	}
 	return f.workspace, f.workspaceErr
-}
-
-func (f *referenceLinkQueryFake) GetIssueInWorkspace(_ context.Context, p db.GetIssueInWorkspaceParams) (db.Issue, error) {
-	f.idReads = append(f.idReads, p)
-	if f.issueErr != nil {
-		return db.Issue{}, f.issueErr
-	}
-	if p.WorkspaceID != f.workspace.ID || p.ID != f.issue.ID {
-		return db.Issue{}, pgx.ErrNoRows
-	}
-	return f.issue, nil
-}
-
-func (f *referenceLinkQueryFake) GetIssueByNumber(_ context.Context, p db.GetIssueByNumberParams) (db.Issue, error) {
-	f.numberReads = append(f.numberReads, p)
-	if f.issueErr != nil {
-		return db.Issue{}, f.issueErr
-	}
-	if p.WorkspaceID != f.workspace.ID || p.Number != f.issue.Number {
-		return db.Issue{}, pgx.ErrNoRows
-	}
-	return f.issue, nil
 }
 
 func referenceLinkFixture(t *testing.T) (*Patcher, *referenceLinkQueryFake) {
 	t.Helper()
 	p, base, _ := newTestPatcher(t)
-	wsID := uuidFromString(t, "ffffffff-ffff-ffff-ffff-ffffffffffff")
-	q := &referenceLinkQueryFake{
-		fakePatcherQueries: base,
-		workspace:          db.Workspace{ID: wsID, Slug: "feedback", IssuePrefix: "FEED"},
-		referenceID:        uuidFromString(t, "11111111-1111-4111-8111-111111111111"),
-		referenceWS:        wsID,
-		issue: db.Issue{
-			ID:          uuidFromString(t, "44444444-4444-4444-8444-444444444444"),
-			WorkspaceID: wsID, Number: 193,
-		},
-	}
+	q := &referenceLinkQueryFake{fakePatcherQueries: base, workspace: db.Workspace{ID: uuidFromString(t, "ffffffff-ffff-ffff-ffff-ffffffffffff"), Slug: "feedback", IssuePrefix: "FEED"}}
 	p.queries = q
 	p.cfg.AppURL = "https://deployment.example/"
 	return p, q
 }
 
 func TestLinkReplyReferencesEntities(t *testing.T) {
-	for kind, route := range map[string]string{"project": "projects", "member": "members", "agent": "agents", "squad": "squads"} {
+	for kind, route := range map[string]string{"issue": "issues", "project": "projects", "member": "members", "agent": "agents", "squad": "squads"} {
 		t.Run(kind, func(t *testing.T) {
 			p, q := referenceLinkFixture(t)
-			q.workspace.IssuePrefix = "" // Non-issue references do not need an issue prefix.
-			id := uuidString(q.referenceID)
+			q.workspace.IssuePrefix = "" // UUID references do not need an issue prefix.
+			id := referenceUUID
 			body := "[@Label](mention://" + kind + "/" + id + ")"
 			want := "[@Label](https://deployment.example/feedback/" + route + "/" + id + ")"
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body+" "+body); got != want+" "+want {
 				t.Fatalf("reply=%q, want=%q", got, want+" "+want)
 			}
-			if q.workspaceReads != 1 || len(q.referenceReads) != 1 || q.referenceReads[0] != (referenceLookup{kind, q.referenceID, q.workspace.ID}) {
-				t.Fatalf("unscoped or duplicate reads: %+v", q.referenceReads)
+			if q.workspaceReads != 1 || q.workspaceReadID != q.workspace.ID {
+				t.Fatalf("workspace reads=%d, id=%v", q.workspaceReads, q.workspaceReadID)
 			}
 		})
 	}
@@ -144,9 +82,9 @@ func TestLinkReplyReferencesMarkdownForms(t *testing.T) {
 		} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
 				p, q := referenceLinkFixture(t)
-				id, resolved := uuidString(q.referenceID), uuidString(q.referenceID)
+				id, resolved := referenceUUID, referenceUUID
 				if kind == "issue" {
-					id, resolved = uuidString(q.issue.ID), "FEED-193"
+					id, resolved = issueUUID, issueUUID
 				}
 				target := "mention://" + kind + "/" + id
 				body := fmt.Sprintf(tc.body, target)
@@ -174,9 +112,9 @@ func TestLinkReplyReferencesEncodedTargets(t *testing.T) {
 	for kind, route := range map[string]string{"issue": "issues", "project": "projects", "member": "members", "agent": "agents", "squad": "squads"} {
 		t.Run(kind, func(t *testing.T) {
 			p, q := referenceLinkFixture(t)
-			id, resolved := uuidString(q.referenceID), uuidString(q.referenceID)
+			id, resolved := referenceUUID, referenceUUID
 			if kind == "issue" {
-				id, resolved = uuidString(q.issue.ID), "FEED-193"
+				id, resolved = issueUUID, issueUUID
 			}
 			var body, want []string
 			link := "https://deployment.example/feedback/" + route + "/" + resolved
@@ -187,33 +125,32 @@ func TestLinkReplyReferencesEncodedTargets(t *testing.T) {
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, strings.Join(body, " ")); got != strings.Join(want, " ") {
 				t.Fatalf("reply=%q, want=%q", got, strings.Join(want, " "))
 			}
-			if q.workspaceReads != 1 || len(q.referenceReads)+len(q.idReads) != 1 {
-				t.Fatal("normalized aliases did not share the resource cache")
+			if q.workspaceReads != 1 {
+				t.Fatalf("encoded targets queried workspace %d times", q.workspaceReads)
 			}
 		})
 	}
 }
 
 func TestLinkReplyReferencesPreservesUnresolved(t *testing.T) {
-	for _, kind := range []string{"project", "member", "agent", "squad"} {
-		for _, failure := range []string{"missing", "foreign workspace", "unknown UUID", "malformed UUID", "workspace error"} {
+	for _, kind := range []string{"issue", "project", "member", "agent", "squad"} {
+		for _, failure := range []string{"malformed UUID", "workspace error", "missing slug", "wrong workspace metadata"} {
 			t.Run(kind+"/"+failure, func(t *testing.T) {
 				p, q := referenceLinkFixture(t)
-				id := uuidString(q.referenceID)
+				workspaceID := q.workspace.ID
+				id := referenceUUID
 				switch failure {
-				case "missing":
-					q.referenceErr = pgx.ErrNoRows
-				case "foreign workspace":
-					q.referenceWS = q.issue.ID
-				case "unknown UUID":
-					id = uuidString(q.issue.ID)
 				case "malformed UUID":
 					id = "not-an-id"
 				case "workspace error":
 					q.workspaceErr = errors.New("unavailable")
+				case "missing slug":
+					q.workspace.Slug = ""
+				case "wrong workspace metadata":
+					q.workspace.ID = uuidFromString(t, "55555555-5555-4555-8555-555555555555")
 				}
 				body := "[@Label](mention://" + kind + "/" + id + ")"
-				if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != body {
+				if got := p.linkReplyReferences(context.Background(), workspaceID, body); got != body {
 					t.Fatalf("unresolved reference changed: %q", got)
 				}
 			})
@@ -221,33 +158,15 @@ func TestLinkReplyReferencesPreservesUnresolved(t *testing.T) {
 	}
 }
 
-func TestLinkReplyReferencesSharesBudgetAndCacheByKind(t *testing.T) {
+func TestLinkReplyReferencesLoadsWorkspaceOnceOnFailure(t *testing.T) {
 	p, q := referenceLinkFixture(t)
-	id := uuidString(q.referenceID)
-	body := ""
-	for _, kind := range []string{"project", "member", "agent", "squad"} {
-		body += "[@Label](mention://" + kind + "/" + id + ") "
+	q.workspaceErr = errors.New("unavailable")
+	body := "FEED-193 [Project](mention://project/" + referenceUUID + ") [Member](mention://member/" + referenceUUID + ")"
+	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, strings.Repeat(body, 30)); got != strings.Repeat(body, 30) {
+		t.Fatalf("failed workspace lookup changed reply: %q", got)
 	}
-	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, strings.Repeat(body, 3)); strings.Contains(got, "mention://") || len(q.referenceReads) != 4 {
-		t.Fatalf("cache mixed target kinds: reads=%+v, reply=%q", q.referenceReads, got)
-	}
-	p, q = referenceLinkFixture(t)
-	body = ""
-	for i := 1; i <= 30; i++ {
-		if i%2 == 0 {
-			body += fmt.Sprintf("FEED-%d ", i)
-		} else {
-			body += fmt.Sprintf("[Project](mention://project/%08x-1111-4111-8111-111111111111) ", i)
-		}
-	}
-	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != body || len(q.referenceReads)+len(q.numberReads) != 20 {
-		t.Fatalf("mixed budget: references=%d, issues=%d", len(q.referenceReads), len(q.numberReads))
-	}
-	p, q = referenceLinkFixture(t)
-	body = "FEED-194 [Project](mention://project/" + uuidString(q.referenceID) + ")"
-	want := "FEED-194 [Project](https://deployment.example/feedback/projects/" + uuidString(q.referenceID) + ")"
-	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
-		t.Fatalf("issue miss suppressed later project: %q", got)
+	if q.workspaceReads != 1 {
+		t.Fatalf("failed workspace lookup retried %d times", q.workspaceReads)
 	}
 }
 
@@ -266,9 +185,9 @@ func TestPatcherLinksAllReferencesForFeishu(t *testing.T) {
 	base.installation.WorkspaceID = q.workspace.ID
 	p.queries = q
 	p.cfg.AppURL = "https://deployment.example"
-	id := uuidString(q.referenceID)
-	body := "[Issue](mention://issue/" + uuidString(q.issue.ID) + ")"
-	want := "[Issue](https://deployment.example/feedback/issues/FEED-193)"
+	id := referenceUUID
+	body := "[Issue](mention://issue/" + issueUUID + ")"
+	want := "[Issue](https://deployment.example/feedback/issues/" + issueUUID + ")"
 	for _, entry := range []struct{ kind, route string }{{"project", "projects"}, {"member", "members"}, {"agent", "agents"}, {"squad", "squads"}} {
 		body += " [@Label](mention://" + entry.kind + "/" + id + ")"
 		want += " [@Label](https://deployment.example/feedback/" + entry.route + "/" + id + ")"
@@ -287,18 +206,19 @@ func TestPatcherLinksAllReferencesForFeishu(t *testing.T) {
 func TestLinkReplyIssues(t *testing.T) {
 	const (
 		internal = "mention://issue/44444444-4444-4444-8444-444444444444"
+		uuidWeb  = "https://deployment.example/feedback/issues/44444444-4444-4444-8444-444444444444"
 		web      = "https://deployment.example/feedback/issues/FEED-193"
 	)
 	for _, tc := range []struct{ name, body, want string }{
-		{"UUID link", "已记录：[FEED-193](" + internal + ")。", "已记录：[FEED-193](" + web + ")。"},
+		{"UUID link", "已记录：[FEED-193](" + internal + ")。", "已记录：[FEED-193](" + uuidWeb + ")。"},
 		{"identifier link", "[反馈](mention://issue/FEED-193)", "[反馈](" + web + ")"},
-		{"nested label", "[反馈 [详情]](" + internal + ")", "[反馈 [详情]](" + web + ")"},
-		{"escaped label", `[反馈 \[详情\]](` + internal + `)`, `[反馈 \[详情\]](` + web + `)`},
-		{"code in label", "[详情 `]` FEED-193](" + internal + ")", "[详情 `]` FEED-193](" + web + ")"},
-		{"title and angle destination", "[反馈](<" + internal + "> \"详情\")", "[反馈](<" + web + "> \"详情\")"},
-		{"internal full reference", "[反馈][task]\n\n[task]: " + internal, "[反馈](" + web + ")\n\n[task]: " + internal},
-		{"internal collapsed reference", "[FEED-193][]\n\n[FEED-193]: " + internal, "[FEED-193](" + web + ")\n\n[FEED-193]: " + internal},
-		{"internal shortcut reference", "[FEED-193]\n\n[FEED-193]: " + internal, "[FEED-193](" + web + ")\n\n[FEED-193]: " + internal},
+		{"nested label", "[反馈 [详情]](" + internal + ")", "[反馈 [详情]](" + uuidWeb + ")"},
+		{"escaped label", `[反馈 \[详情\]](` + internal + `)`, `[反馈 \[详情\]](` + uuidWeb + `)`},
+		{"code in label", "[详情 `]` FEED-193](" + internal + ")", "[详情 `]` FEED-193](" + uuidWeb + ")"},
+		{"title and angle destination", "[反馈](<" + internal + "> \"详情\")", "[反馈](<" + uuidWeb + "> \"详情\")"},
+		{"internal full reference", "[反馈][task]\n\n[task]: " + internal, "[反馈](" + uuidWeb + ")\n\n[task]: " + internal},
+		{"internal collapsed reference", "[FEED-193][]\n\n[FEED-193]: " + internal, "[FEED-193](" + uuidWeb + ")\n\n[FEED-193]: " + internal},
+		{"internal shortcut reference", "[FEED-193]\n\n[FEED-193]: " + internal, "[FEED-193](" + uuidWeb + ")\n\n[FEED-193]: " + internal},
 		{"bare and punctuation", "已记录：FEED-193。 FEED-193.", "已记录：[FEED-193](" + web + ")。 [FEED-193](" + web + ")."},
 		{"emphasis", "**FEED-193**", "**[FEED-193](" + web + ")**"},
 		{"inline code", "`FEED-193` `[反馈](" + internal + ")`", ""},
@@ -316,7 +236,7 @@ func TestLinkReplyIssues(t *testing.T) {
 		{"escaped example", `\[FEED-193](` + internal + `)`, ""},
 		{"other prefix", "OTHER-193", ""},
 		{"embedded identifier", "xFEED-193 FEED-193x FEED-193-2", ""},
-		{"unknown issue", "FEED-194", ""},
+		{"unknown issue", "FEED-194", "[FEED-194](https://deployment.example/feedback/issues/FEED-194)"},
 		{"noncanonical number", "FEED-0193 FEED-0 FEED-99999999999999999999", ""},
 		{"plain reply", "已记录。", ""},
 	} {
@@ -343,14 +263,14 @@ func TestLinkReplyIssuesAcceptsNumericPrefixes(t *testing.T) {
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, identifier); got != "["+identifier+"]("+link+")" {
 				t.Fatalf("bare identifier did not link: %q", got)
 			}
-			q.numberReads = nil
+			q.workspaceReads = 0
 			body := identifier + " [编号](mention://issue/" + identifier + ") [UUID](mention://issue/44444444-4444-4444-8444-444444444444)"
-			want := "[" + identifier + "](" + link + ") [编号](" + link + ") [UUID](" + link + ")"
+			want := "[" + identifier + "](" + link + ") [编号](" + link + ") [UUID](https://deployment.example/feedback/issues/" + issueUUID + ")"
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
 				t.Fatalf("reply = %q, want %q", got, want)
 			}
-			if len(q.numberReads) != 1 || len(q.idReads) != 1 {
-				t.Fatalf("unexpected lookups: numbers=%d, UUIDs=%d", len(q.numberReads), len(q.idReads))
+			if q.workspaceReads != 1 || q.workspaceReadID != q.workspace.ID {
+				t.Fatalf("workspace reads=%d, id=%v", q.workspaceReads, q.workspaceReadID)
 			}
 		})
 	}
@@ -385,8 +305,8 @@ func TestLinkReplyIssuesPreservesURLs(t *testing.T) {
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
 				t.Fatalf("reply = %q, want %q", got, want)
 			}
-			if len(q.numberReads) != 1 {
-				t.Fatalf("URL references consumed lookups: %+v", q.numberReads)
+			if q.workspaceReads != 1 {
+				t.Fatalf("workspace reads=%d", q.workspaceReads)
 			}
 		})
 	}
@@ -398,89 +318,192 @@ func TestLinkReplyIssuesPreservesReplyWhenLookupUnavailable(t *testing.T) {
 		setup func(*Patcher, *referenceLinkQueryFake)
 	}{
 		{"workspace error", func(_ *Patcher, q *referenceLinkQueryFake) { q.workspaceErr = errors.New("unavailable") }},
-		{"issue error", func(_ *Patcher, q *referenceLinkQueryFake) { q.issueErr = errors.New("unavailable") }},
 		{"missing slug", func(_ *Patcher, q *referenceLinkQueryFake) { q.workspace.Slug = "" }},
-		{"missing prefix", func(_ *Patcher, q *referenceLinkQueryFake) { q.workspace.IssuePrefix = "" }},
 		{"missing app URL", func(p *Patcher, _ *referenceLinkQueryFake) { p.cfg.AppURL = "" }},
 		{"non HTTP app URL", func(p *Patcher, _ *referenceLinkQueryFake) { p.cfg.AppURL = "mention://app" }},
-		{"foreign issue", func(_ *Patcher, q *referenceLinkQueryFake) {
-			q.issue.WorkspaceID = uuidFromString(t, "55555555-5555-4555-8555-555555555555")
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, q := referenceLinkFixture(t)
 			tc.setup(p, q)
-			body := "已记录：FEED-193 [任务](mention://issue/44444444-4444-4444-8444-444444444444)"
+			body := "FEED-193 [Issue](mention://issue/" + issueUUID + ")"
 			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != body {
-				t.Fatalf("reply changed on failed enrichment: %q", got)
+				t.Fatalf("reply changed without workspace metadata: %q", got)
 			}
 		})
 	}
 }
 
-func TestLinkReplyIssuesBoundsAndScopesLookups(t *testing.T) {
+func TestLinkReplyReferencesWorkspaceReadIsPerReply(t *testing.T) {
 	p, q := referenceLinkFixture(t)
-	body := strings.Repeat("FEED-193 ", 30)
-	got := p.linkReplyReferences(context.Background(), q.workspace.ID, body)
-	if len(q.numberReads) != 1 || q.numberReads[0].WorkspaceID != q.workspace.ID || strings.Count(got, "https://") != 30 {
-		t.Fatalf("repeated references: lookups=%+v, reply=%q", q.numberReads, got)
+	body := "[Project](mention://project/" + referenceUUID + ")"
+	want := "[Project](https://deployment.example/feedback/projects/" + referenceUUID + ")"
+	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+		t.Fatalf("first reply=%q", got)
 	}
-	p, q = referenceLinkFixture(t)
-	body = ""
-	for i := 1; i <= 30; i++ {
-		body += fmt.Sprintf("FEED-%d ", i)
+	q.workspace.Slug = "renamed"
+	want = "[Project](https://deployment.example/renamed/projects/" + referenceUUID + ")"
+	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+		t.Fatalf("second reply=%q", got)
 	}
-	if got = p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != body || len(q.numberReads) != 20 {
-		t.Fatalf("lookup bound: lookups=%d, reply=%q", len(q.numberReads), got)
-	}
-	for _, read := range q.numberReads {
-		if read.WorkspaceID != q.workspace.ID {
-			t.Fatalf("unscoped lookup: %+v", read)
-		}
-	}
-	p, q = referenceLinkFixture(t)
-	body = "[任务](mention://issue/44444444-4444-4444-8444-444444444444)"
-	_ = p.linkReplyReferences(context.Background(), q.workspace.ID, body)
-	if len(q.idReads) != 1 || q.idReads[0].WorkspaceID != q.workspace.ID {
-		t.Fatalf("unscoped UUID lookup: %+v", q.idReads)
+	if q.workspaceReads != 2 || q.workspaceReadID != q.workspace.ID {
+		t.Fatalf("workspace reads=%d", q.workspaceReads)
 	}
 }
 
 func TestPatcherLinksIssueReferencesForFeishu(t *testing.T) {
-	for _, body := range []string{
-		"已记录：[DEMO-193](mention://issue/44444444-4444-4444-8444-444444444444)。",
-		"已记录：DEMO-193。",
+	for _, tc := range []struct{ body, target string }{
+		{"已记录：[DEMO-193](mention://issue/" + issueUUID + ")。", issueUUID},
+		{"已记录：DEMO-193。", "DEMO-193"},
 	} {
-		t.Run(body, func(t *testing.T) {
+		t.Run(tc.body, func(t *testing.T) {
 			p, base, api := groupPatcherWithSender(t, "ou_sender")
 			wsID := uuidFromString(t, "ffffffff-ffff-ffff-ffff-ffffffffffff")
 			base.installation.WorkspaceID = wsID
-			p.queries = &referenceLinkQueryFake{
-				fakePatcherQueries: base,
-				workspace:          db.Workspace{ID: wsID, Slug: "demo", IssuePrefix: "DEMO"},
-				issue: db.Issue{
-					ID:          uuidFromString(t, "44444444-4444-4444-8444-444444444444"),
-					WorkspaceID: wsID, Number: 193,
-				},
-			}
-			// Set through the config exactly as the production router does.
+			q := &referenceLinkQueryFake{fakePatcherQueries: base, workspace: db.Workspace{ID: wsID, Slug: "demo", IssuePrefix: "DEMO"}}
+			p.queries = q
 			p.cfg.AppURL = "https://multica.example"
-			p.handleEvent(events.Event{
-				Type:   protocol.EventChatDone,
-				TaskID: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", ChatSessionID: uuidString(base.binding.ChatSessionID),
-				Payload: protocol.ChatDonePayload{Content: body},
-			})
+			p.handleEvent(events.Event{Type: protocol.EventChatDone, TaskID: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", ChatSessionID: uuidString(base.binding.ChatSessionID), Payload: protocol.ChatDonePayload{Content: tc.body}})
 			if len(api.mdCardSent) != 1 || len(api.textSent) != 0 {
-				t.Fatalf("expected one linked markdown reply, got cards=%d text=%d", len(api.mdCardSent), len(api.textSent))
+				t.Fatalf("cards=%d, texts=%d", len(api.mdCardSent), len(api.textSent))
 			}
 			got := api.mdCardSent[0]
-			want := prependMarkdownMention("ou_sender", "已记录：[DEMO-193](https://multica.example/demo/issues/DEMO-193)。")
-			if got.Markdown != want {
-				t.Fatalf("reply = %q, want %q", got.Markdown, want)
+			want := prependMarkdownMention("ou_sender", "已记录：[DEMO-193](https://multica.example/demo/issues/"+tc.target+")。")
+			if got.Markdown != want || got.ReplyTarget != threadReplyTarget(base.binding) {
+				t.Fatalf("outbound=%+v, want=%q", got, want)
 			}
-			if got.ReplyTarget != threadReplyTarget(base.binding) {
-				t.Fatalf("reply target changed: %+v", got.ReplyTarget)
+			if q.workspaceReads != 1 {
+				t.Fatalf("workspace reads=%d", q.workspaceReads)
 			}
 		})
+	}
+}
+
+func TestLinkReplyReferencesNonexistentTargets(t *testing.T) {
+	const id = "99999999-9999-4999-8999-999999999999"
+	for kind, route := range map[string]string{"issue": "issues", "project": "projects", "member": "members", "agent": "agents", "squad": "squads"} {
+		t.Run(kind, func(t *testing.T) {
+			p, q := referenceLinkFixture(t)
+			body := "[Missing](mention://" + kind + "/" + id + ")"
+			want := "[Missing](https://deployment.example/feedback/" + route + "/" + id + ")"
+			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+				t.Fatalf("reply=%q, want=%q", got, want)
+			}
+			if q.workspaceReads != 1 {
+				t.Fatalf("workspace reads=%d", q.workspaceReads)
+			}
+		})
+	}
+	t.Run("matching issue identifier", func(t *testing.T) {
+		p, q := referenceLinkFixture(t)
+		body := "FEED-194 [Missing](mention://issue/FEED-194)"
+		link := "https://deployment.example/feedback/issues/FEED-194"
+		want := "[FEED-194](" + link + ") [Missing](" + link + ")"
+		if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+			t.Fatalf("reply=%q, want=%q", got, want)
+		}
+		if q.workspaceReads != 1 {
+			t.Fatalf("workspace reads=%d", q.workspaceReads)
+		}
+	})
+}
+
+func TestLinkReplyReferencesManyTargetsUseOneWorkspaceRead(t *testing.T) {
+	for _, count := range []int{1, 32, 80} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			p, q := referenceLinkFixture(t)
+			var body, want strings.Builder
+			for i := 1; i <= count; i++ {
+				id := fmt.Sprintf("%08x-9999-4999-8999-999999999999", i)
+				for _, entry := range []struct{ kind, route string }{{"issue", "issues"}, {"project", "projects"}, {"member", "members"}, {"agent", "agents"}, {"squad", "squads"}} {
+					fmt.Fprintf(&body, "[Label](mention://%s/%s) ", entry.kind, id)
+					fmt.Fprintf(&want, "[Label](https://deployment.example/feedback/%s/%s) ", entry.route, id)
+				}
+				fmt.Fprintf(&body, "FEED-%d ", i)
+				fmt.Fprintf(&want, "[FEED-%d](https://deployment.example/feedback/issues/FEED-%d) ", i, i)
+			}
+			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body.String()); got != want.String() {
+				t.Fatal("distinct nonexistent targets were not all linked")
+			}
+			if q.workspaceReads != 1 {
+				t.Fatalf("workspace reads=%d for %d targets", q.workspaceReads, count*6)
+			}
+		})
+	}
+}
+
+func TestLinkReplyReferencesNoCandidatesAvoidWorkspaceRead(t *testing.T) {
+	for _, body := range []string{
+		"Plain reply.",
+		"`FEED-193 [Project](mention://project/11111111-1111-4111-8111-111111111111)`",
+		"```md\nFEED-193\n[Project](mention://project/11111111-1111-4111-8111-111111111111)\n```",
+		"![FEED-193](mention://project/11111111-1111-4111-8111-111111111111)",
+		"[FEED-193](https://docs.example/FEED-193)",
+		"https://docs.example/?q=FEED-193",
+		"[Label](mention://unknown/11111111-1111-4111-8111-111111111111)",
+		"[Label](mention://project/not-a-uuid)",
+		"[Label](mention://issue/not-a-uuid)",
+		"FEED-0 FEED-0193 FEED-999999999999999999999",
+	} {
+		t.Run(body, func(t *testing.T) {
+			p, q := referenceLinkFixture(t)
+			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != body {
+				t.Fatalf("reply changed: %q", got)
+			}
+			if q.workspaceReads != 0 {
+				t.Fatalf("nonconvertible content queried workspace %d times", q.workspaceReads)
+			}
+		})
+	}
+}
+
+func TestLinkReplyReferencesUnrelatedPrefixes(t *testing.T) {
+	for _, tc := range []struct{ prefix, body, want string }{
+		{"FEED", "UTF-8 SHA-256 OTHER-193", "UTF-8 SHA-256 OTHER-193"},
+		{"FEED", "UTF-8 FEED-194 SHA-256", "UTF-8 [FEED-194](https://deployment.example/feedback/issues/FEED-194) SHA-256"},
+		{"UTF", "UTF-8 SHA-256", "[UTF-8](https://deployment.example/feedback/issues/UTF-8) SHA-256"},
+	} {
+		t.Run(tc.prefix+"/"+tc.body, func(t *testing.T) {
+			p, q := referenceLinkFixture(t)
+			q.workspace.IssuePrefix = tc.prefix
+			if got := p.linkReplyReferences(context.Background(), q.workspace.ID, tc.body); got != tc.want {
+				t.Fatalf("reply=%q, want=%q", got, tc.want)
+			}
+			if q.workspaceReads != 1 || q.workspaceReadID != q.workspace.ID {
+				t.Fatalf("workspace reads=%d, id=%v", q.workspaceReads, q.workspaceReadID)
+			}
+		})
+	}
+}
+
+func TestLinkReplyReferencesUUIDsWithoutIssuePrefix(t *testing.T) {
+	p, q := referenceLinkFixture(t)
+	q.workspace.IssuePrefix = ""
+	body := "FEED-193 [Issue](mention://issue/" + issueUUID + ")"
+	want := "FEED-193 [Issue](https://deployment.example/feedback/issues/" + issueUUID + ")"
+	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+		t.Fatalf("reply=%q, want=%q", got, want)
+	}
+	if q.workspaceReads != 1 {
+		t.Fatalf("workspace reads=%d", q.workspaceReads)
+	}
+}
+
+func TestLinkReplyReferencesMemberUsesMentionUserID(t *testing.T) {
+	p, q := referenceLinkFixture(t)
+	const userID = "22222222-2222-4222-8222-222222222222"
+	body := "[@User](mention://member/" + userID + ")"
+	want := "[@User](https://deployment.example/feedback/members/" + userID + ")"
+	if got := p.linkReplyReferences(context.Background(), q.workspace.ID, body); got != want {
+		t.Fatalf("reply=%q, want=%q", got, want)
+	}
+}
+
+func TestLinkReplyReferencesCanceledContext(t *testing.T) {
+	p, q := referenceLinkFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body := "FEED-193 [Project](mention://project/" + referenceUUID + ")"
+	if got := p.linkReplyReferences(ctx, q.workspace.ID, body); got != body || q.workspaceReads != 1 {
+		t.Fatalf("reply=%q, reads=%d", got, q.workspaceReads)
 	}
 }
